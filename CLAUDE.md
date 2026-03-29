@@ -142,8 +142,12 @@
 ## 目录结构
 
 ```
-skills/
-  core/                          # 核心分析技能
+.claude/
+  skills/                        # 技能体系 (SDK 自动发现)
+    question-classifier/         # 问题分类路由 [元技能]
+    quality-gate/                # 质量门控 [元技能]
+    source-validator/            # 数据溯源验证 [元技能]
+    thinking-chain-builder/      # 思维链构建器 [元技能]
     stock-deep-analysis/         # 个股深度分析
     earnings-review/             # 业绩点评
     industry-chain/              # 行业链分析
@@ -157,17 +161,23 @@ skills/
     roadshow-analysis/           # 路演纪要分析
     comparative-analysis/        # 比较分析
     portfolio-strategy/          # 投资组合策略
-  meta/                          # 元技能
-    question-classifier/         # 问题分类路由
-    quality-gate/                # 质量门控
-    source-validator/            # 数据溯源验证
-    thinking-chain-builder/      # 思维链构建器
-  data/                          # 数据接入技能
     datasource-query/            # 数据源查询
     market-data/                 # 行情数据
     fund-flow/                   # 资金流向
     news-sentiment/              # 新闻舆情
-commands/                        # 命令入口
+  commands/                      # 命令调度器
+    analyze/                     # 综合分析入口
+    briefing/                    # 晨报/复盘
+    deep-dive/                   # 深度研究
+    compare/                     # 对比分析
+    debate/                      # 多空辩论
+    risk-check/                  # 风险检查
+    valuation/                   # 估值分析
+    macro/                       # 宏观分析
+agent-service/                   # Claude Agent SDK 服务 (FastAPI)
+  main.py                        # API 入口
+  test_local.py                  # 本地验证
+  requirements.txt               # Python 依赖
 references/                      # 参考资料库
   valuation-methods.md           # 估值方法论
   financial-analysis-framework.md # 财务分析框架
