@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "horiz-datasource": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/mcp-proxy", "--endpoint", "http://localhost:3001"],
+      "description": "Horiz 投研数据源 API — 路演纪要、研报、公众号文章、AI热股"
+    },
+    "tavily": {
+      "command": "npx",
+      "args": ["-y", "tavily-mcp@latest"],
+      "env": {
+        "TAVILY_API_KEY": "${TAVILY_API_KEY}"
+      },
+      "description": "网络搜索 — 实时新闻、公司信息、行业动态"
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/mcp-playwright"],
+      "description": "浏览器操作 — 抓取公开财经页面、交易所公告"
+    }
+  }
+}
