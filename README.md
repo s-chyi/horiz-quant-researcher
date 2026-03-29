@@ -25,14 +25,12 @@ horiz-quant-researcher/
 ├── .mcp.json                 # MCP服务器配置
 ├── DATA_GAP_REPORT.md        # 数据缺口报告
 │
-├── skills/                   # 技能体系 (17个技能)
-│   ├── meta/                 # 元技能 (4个)
-│   │   ├── question-classifier/   # 问题分类路由
-│   │   ├── quality-gate/          # 质量门控
-│   │   ├── thinking-chain-builder/ # 思维链构建器
-│   │   └── source-validator/      # 数据源验证
-│   │
-│   ├── core/                 # 核心分析技能 (10个)
+├── .claude/                  # Claude Agent SDK 配置目录
+│   ├── skills/              # 技能体系 (21个技能, SDK自动发现)
+│   │   ├── question-classifier/   # 问题分类路由 [元技能]
+│   │   ├── quality-gate/          # 质量门控 [元技能]
+│   │   ├── thinking-chain-builder/ # 思维链构建器 [元技能]
+│   │   ├── source-validator/      # 数据源验证 [元技能]
 │   │   ├── stock-deep-analysis/   # 个股深度分析
 │   │   ├── earnings-review/       # 业绩解读
 │   │   ├── industry-chain/        # 产业链分析
@@ -45,23 +43,26 @@ horiz-quant-researcher/
 │   │   ├── report-interpretation/ # 研报解读
 │   │   ├── roadshow-analysis/     # 路演分析
 │   │   ├── comparative-analysis/  # 比较分析
-│   │   └── portfolio-strategy/    # 组合策略
+│   │   ├── portfolio-strategy/    # 组合策略
+│   │   ├── datasource-query/      # 私域数据查询
+│   │   ├── market-data/           # 市场行情
+│   │   ├── fund-flow/             # 资金流向
+│   │   └── news-sentiment/        # 新闻舆情
 │   │
-│   └── data/                 # 数据技能 (4个)
-│       ├── datasource-query/      # 私域数据查询
-│       ├── market-data/           # 市场行情
-│       ├── fund-flow/             # 资金流向
-│       └── news-sentiment/        # 新闻舆情
+│   └── commands/            # 命令调度器 (8个)
+│       ├── analyze/              # 综合分析入口
+│       ├── briefing/             # 晨报/复盘
+│       ├── deep-dive/            # 深度研究 (核心竞争力)
+│       ├── compare/              # 对比分析
+│       ├── debate/               # 多空辩论
+│       ├── risk-check/           # 风险检查
+│       ├── valuation/            # 估值分析
+│       └── macro/                # 宏观分析
 │
-├── commands/                 # 命令调度器 (8个)
-│   ├── analyze/              # 综合分析入口
-│   ├── briefing/             # 晨报/复盘
-│   ├── deep-dive/            # 深度研究 (核心竞争力)
-│   ├── compare/              # 对比分析
-│   ├── debate/               # 多空辩论
-│   ├── risk-check/           # 风险检查
-│   ├── valuation/            # 估值分析
-│   └── macro/                # 宏观分析
+├── agent-service/            # Claude Agent SDK 服务 (FastAPI)
+│   ├── main.py              # API 服务入口
+│   ├── test_local.py        # 本地验证脚本
+│   └── requirements.txt     # Python 依赖
 │
 └── references/               # 参考知识库 (6个)
     ├── valuation-methods.md       # 估值方法论
