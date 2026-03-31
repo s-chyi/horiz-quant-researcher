@@ -1,0 +1,515 @@
+"""
+Horiz Quant Researcher — AKShare Financial Data Service
+Provides A-share financial data via REST API using AKShare.
+
+Port: 8901
+"""
+
+import re
+import traceback
+from datetime import datetime, timedelta
+from functools import wraps
+from typing import Optional
+
+import akshare as ak
+import pandas as pd
+from cachetools import TTLCache
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+app = FastAPI(
+    title="Horiz AKShare Data Service",
+    description="A-share financial data API powered by AKShare",
+    version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- Caches ---
+quote_cache = TTLCache(maxsize=500, ttl=60)         # 1 min
+kline_cache = TTLCache(maxsize=200, ttl=300)         # 5 min
+financial_cache = TTLCache(maxsize=200, ttl=86400)   # 24h
+industry_cache = TTLCache(maxsize=50, ttl=86400)     # 24h
+fund_flow_cache = TTLCache(maxsize=200, ttl=300)     # 5 min
+shareholder_cache = TTLCache(maxsize=200, ttl=86400) # 24h
+index_cache = TTLCache(maxsize=50, ttl=60)           # 1 min
+
+
+def normalize_code(code: str) -> tuple[str, str]:
+    """Normalize stock code. Returns (pure_code, market).
+    600519 -> ('600519', 'sh')
+    600519.SH -> ('600519', 'sh')
+    000001.SZ -> ('000001', 'sz')
+    """
+    code = code.strip().upper()
+    if '.' in code:
+        parts = code.split('.')
+        return parts[0], parts[1].lower()
+    
+    pure = code.lstrip('0') if len(code) > 6 else code
+    # Determine market by code prefix
+    if code.startswith('6') or code.startswith('5') or code.startswith('9'):
+        return code, 'sh'
+    elif code.startswith('0') or code.startswith('2') or code.startswith('3'):
+        return code, 'sz'
+    else:
+        return code, 'sh'
+
+
+def safe_float(val) -> Optional[float]:
+    """Safely convert to float."""
+    if val is None or pd.isna(val):
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
+def safe_int(val) -> Optional[int]:
+    """Safely convert to int."""
+    if val is None or pd.isna(val):
+        return None
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return None
+
+
+def safe_str(val) -> Optional[str]:
+    """Safely convert to string."""
+    if val is None or pd.isna(val):
+        return None
+    return str(val)
+
+
+def df_to_records(df: pd.DataFrame, limit: int = None) -> list[dict]:
+    """Convert DataFrame to list of dicts with NaN handling."""
+    if df is None or df.empty:
+        return []
+    if limit:
+        df = df.head(limit)
+    records = df.where(df.notna(), None).to_dict('records')
+    # Convert numpy types
+    clean = []
+    for r in records:
+        row = {}
+        for k, v in r.items():
+            k_str = str(k)
+            if isinstance(v, (pd.Timestamp, datetime)):
+                row[k_str] = v.isoformat()
+            elif hasattr(v, 'item'):  # numpy scalar
+                row[k_str] = v.item()
+            else:
+                row[k_str] = v
+        clean.append(row)
+    return clean
+
+
+# --- Error handler ---
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=500,
+        content={"error": str(exc), "type": type(exc).__name__}
+    )
+
+
+# --- Health ---
+@app.get("/health")
+async def health():
+    return {
+        "status": "ok",
+        "service": "akshare-data",
+        "akshare_version": ak.__version__,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+# --- Quote ---
+@app.get("/api/v1/quote/{code}")
+async def get_quote(code: str):
+    """实时行情: 股价、涨跌幅、成交量、市值、PE/PB"""
+    pure_code, market = normalize_code(code)
+    cache_key = f"quote:{pure_code}"
+    
+    if cache_key in quote_cache:
+        return quote_cache[cache_key]
+    
+    try:
+        df = ak.stock_zh_a_spot_em()
+        row = df[df['代码'] == pure_code]
+        if row.empty:
+            raise HTTPException(status_code=404, detail=f"Stock {pure_code} not found")
+        
+        r = row.iloc[0]
+        result = {
+            "code": pure_code,
+            "name": safe_str(r.get('名称')),
+            "price": safe_float(r.get('最新价')),
+            "change_pct": safe_float(r.get('涨跌幅')),
+            "change_amount": safe_float(r.get('涨跌额')),
+            "volume": safe_int(r.get('成交量')),
+            "amount": safe_float(r.get('成交额')),
+            "open": safe_float(r.get('今开')),
+            "high": safe_float(r.get('最高')),
+            "low": safe_float(r.get('最低')),
+            "prev_close": safe_float(r.get('昨收')),
+            "turnover_rate": safe_float(r.get('换手率')),
+            "pe_ratio": safe_float(r.get('市盈率-动态')),
+            "pb_ratio": safe_float(r.get('市净率')),
+            "total_market_cap": safe_float(r.get('总市值')),
+            "circulating_market_cap": safe_float(r.get('流通市值')),
+            "amplitude": safe_float(r.get('振幅')),
+            "volume_ratio": safe_float(r.get('量比')),
+            "52w_high": safe_float(r.get('60日最高')),
+            "52w_low": safe_float(r.get('60日最低')),
+            "source": "akshare/eastmoney",
+            "updated_at": datetime.now().isoformat(),
+        }
+        quote_cache[cache_key] = result
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch quote: {e}")
+
+
+# --- K-Line ---
+@app.get("/api/v1/kline/{code}")
+async def get_kline(
+    code: str,
+    period: str = Query("daily", description="daily/weekly/monthly"),
+    days: int = Query(250, description="Number of trading days"),
+    adjust: str = Query("qfq", description="qfq=前复权, hfq=后复权, empty=不复权"),
+):
+    """日K线数据 (OHLCV)"""
+    pure_code, market = normalize_code(code)
+    cache_key = f"kline:{pure_code}:{period}:{days}:{adjust}"
+    
+    if cache_key in kline_cache:
+        return kline_cache[cache_key]
+    
+    try:
+        start = (datetime.now() - timedelta(days=days * 2)).strftime("%Y%m%d")
+        end = datetime.now().strftime("%Y%m%d")
+        
+        df = ak.stock_zh_a_hist(
+            symbol=pure_code, period=period,
+            start_date=start, end_date=end,
+            adjust=adjust if adjust else ""
+        )
+        
+        if df is None or df.empty:
+            return {"code": pure_code, "period": period, "data": [], "count": 0}
+        
+        df = df.tail(days)
+        records = []
+        for _, r in df.iterrows():
+            records.append({
+                "date": str(r.get('日期', '')),
+                "open": safe_float(r.get('开盘')),
+                "high": safe_float(r.get('最高')),
+                "low": safe_float(r.get('最低')),
+                "close": safe_float(r.get('收盘')),
+                "volume": safe_int(r.get('成交量')),
+                "amount": safe_float(r.get('成交额')),
+                "turnover": safe_float(r.get('换手率')),
+            })
+        
+        result = {
+            "code": pure_code,
+            "period": period,
+            "adjust": adjust,
+            "data": records,
+            "count": len(records),
+        }
+        kline_cache[cache_key] = result
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch kline: {e}")
+
+
+# --- Financials (Income Statement Summary) ---
+@app.get("/api/v1/financials/{code}")
+async def get_financials(code: str, limit: int = Query(8, description="Number of quarters")):
+    """财务报表摘要: 营收/净利/毛利率/净利率/ROE"""
+    pure_code, market = normalize_code(code)
+    cache_key = f"fin:{pure_code}:{limit}"
+    
+    if cache_key in financial_cache:
+        return financial_cache[cache_key]
+    
+    try:
+        # Try financial analysis indicators first
+        symbol = f"{pure_code}"
+        df = ak.stock_financial_analysis_indicator(symbol=symbol)
+        
+        if df is None or df.empty:
+            return {"code": pure_code, "data": [], "source": "akshare", "note": "No data available"}
+        
+        df = df.head(limit)
+        records = df_to_records(df)
+        
+        result = {
+            "code": pure_code,
+            "data": records,
+            "count": len(records),
+            "source": "akshare/eastmoney",
+        }
+        financial_cache[cache_key] = result
+        return result
+    except Exception as e:
+        # Fallback: try profit sheet
+        try:
+            df = ak.stock_profit_sheet_by_report_em(symbol=f"{market.upper()}{pure_code}")
+            if df is not None and not df.empty:
+                records = df_to_records(df, limit)
+                result = {
+                    "code": pure_code,
+                    "data": records,
+                    "count": len(records),
+                    "source": "akshare/eastmoney/profit_sheet",
+                }
+                financial_cache[cache_key] = result
+                return result
+        except:
+            pass
+        raise HTTPException(status_code=500, detail=f"Failed to fetch financials: {e}")
+
+
+# --- Balance Sheet ---
+@app.get("/api/v1/balance-sheet/{code}")
+async def get_balance_sheet(code: str, limit: int = Query(4)):
+    """资产负债表关键指标"""
+    pure_code, market = normalize_code(code)
+    cache_key = f"bs:{pure_code}:{limit}"
+    
+    if cache_key in financial_cache:
+        return financial_cache[cache_key]
+    
+    try:
+        df = ak.stock_balance_sheet_by_report_em(symbol=f"{market.upper()}{pure_code}")
+        if df is None or df.empty:
+            return {"code": pure_code, "data": [], "note": "No data"}
+        
+        records = df_to_records(df, limit)
+        result = {"code": pure_code, "data": records, "count": len(records), "source": "akshare"}
+        financial_cache[cache_key] = result
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Balance sheet error: {e}")
+
+
+# --- Cash Flow ---
+@app.get("/api/v1/cash-flow/{code}")
+async def get_cash_flow(code: str, limit: int = Query(4)):
+    """现金流量表"""
+    pure_code, market = normalize_code(code)
+    cache_key = f"cf:{pure_code}:{limit}"
+    
+    if cache_key in financial_cache:
+        return financial_cache[cache_key]
+    
+    try:
+        df = ak.stock_cash_flow_sheet_by_report_em(symbol=f"{market.upper()}{pure_code}")
+        if df is None or df.empty:
+            return {"code": pure_code, "data": [], "note": "No data"}
+        
+        records = df_to_records(df, limit)
+        result = {"code": pure_code, "data": records, "count": len(records), "source": "akshare"}
+        financial_cache[cache_key] = result
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cash flow error: {e}")
+
+
+# --- DuPont / Financial Indicators ---
+@app.get("/api/v1/indicators/{code}")
+async def get_indicators(code: str):
+    """财务指标 + 杜邦分析"""
+    pure_code, market = normalize_code(code)
+    cache_key = f"ind:{pure_code}"
+    
+    if cache_key in financial_cache:
+        return financial_cache[cache_key]
+    
+    try:
+        df = ak.stock_financial_analysis_indicator(symbol=pure_code)
+        if df is None or df.empty:
+            return {"code": pure_code, "data": [], "note": "No indicator data"}
+        
+        # Take latest 4 periods
+        records = df_to_records(df, 4)
+        result = {
+            "code": pure_code,
+            "data": records,
+            "count": len(records),
+            "source": "akshare",
+            "note": "Contains ROE, ROA, gross_margin, net_margin, etc.",
+        }
+        financial_cache[cache_key] = result
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Indicators error: {e}")
+
+
+# --- Industry Classification ---
+@app.get("/api/v1/industry/{code}")
+async def get_industry(code: str):
+    """行业分类 + 同行业公司"""
+    pure_code, market = normalize_code(code)
+    cache_key = f"industry:{pure_code}"
+    
+    if cache_key in industry_cache:
+        return industry_cache[cache_key]
+    
+    try:
+        # Get stock's industry
+        df_all = ak.stock_board_industry_cons_em(symbol="白酒")  # This needs the industry name
+        # Alternative: get the stock's info which includes industry
+        
+        # Better approach: search across all industries
+        df_board = ak.stock_board_industry_name_em()
+        
+        if df_board is None or df_board.empty:
+            return {"code": pure_code, "industry": None, "peers": []}
+        
+        # Find which industry contains this stock
+        found_industry = None
+        peers = []
+        
+        for _, row in df_board.iterrows():
+            board_name = row.get('板块名称', '')
+            try:
+                df_cons = ak.stock_board_industry_cons_em(symbol=board_name)
+                if df_cons is not None and not df_cons.empty:
+                    if pure_code in df_cons['代码'].values:
+                        found_industry = board_name
+                        peers = df_cons[['代码', '名称']].head(20).to_dict('records')
+                        break
+            except:
+                continue
+        
+        result = {
+            "code": pure_code,
+            "industry": found_industry,
+            "peers": peers,
+            "source": "akshare/eastmoney",
+        }
+        industry_cache[cache_key] = result
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Industry error: {e}")
+
+
+# --- Fund Flow ---
+@app.get("/api/v1/fund-flow/{code}")
+async def get_fund_flow(code: str):
+    """资金流向"""
+    pure_code, market = normalize_code(code)
+    cache_key = f"flow:{pure_code}"
+    
+    if cache_key in fund_flow_cache:
+        return fund_flow_cache[cache_key]
+    
+    try:
+        df = ak.stock_individual_fund_flow(stock=pure_code, market=market)
+        if df is None or df.empty:
+            return {"code": pure_code, "data": [], "note": "No fund flow data"}
+        
+        records = df_to_records(df, 20)
+        result = {
+            "code": pure_code,
+            "data": records,
+            "count": len(records),
+            "source": "akshare/eastmoney",
+        }
+        fund_flow_cache[cache_key] = result
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fund flow error: {e}")
+
+
+# --- Shareholders ---
+@app.get("/api/v1/shareholders/{code}")
+async def get_shareholders(code: str):
+    """十大股东"""
+    pure_code, market = normalize_code(code)
+    cache_key = f"holders:{pure_code}"
+    
+    if cache_key in shareholder_cache:
+        return shareholder_cache[cache_key]
+    
+    try:
+        df = ak.stock_main_stock_holder(stock=pure_code)
+        if df is None or df.empty:
+            return {"code": pure_code, "data": [], "note": "No shareholder data"}
+        
+        records = df_to_records(df, 20)
+        result = {
+            "code": pure_code,
+            "data": records,
+            "count": len(records),
+            "source": "akshare",
+        }
+        shareholder_cache[cache_key] = result
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Shareholders error: {e}")
+
+
+# --- Index ---
+@app.get("/api/v1/index/{code}")
+async def get_index(code: str):
+    """指数行情 (沪深300=000300, 上证=000001, 创业板=399006)"""
+    cache_key = f"index:{code}"
+    
+    if cache_key in index_cache:
+        return index_cache[cache_key]
+    
+    try:
+        df = ak.stock_zh_index_spot_em()
+        if df is None or df.empty:
+            raise HTTPException(status_code=500, detail="Failed to fetch index data")
+        
+        row = df[df['代码'] == code]
+        if row.empty:
+            # Try partial match
+            row = df[df['代码'].str.contains(code)]
+        
+        if row.empty:
+            raise HTTPException(status_code=404, detail=f"Index {code} not found")
+        
+        r = row.iloc[0]
+        result = {
+            "code": safe_str(r.get('代码')),
+            "name": safe_str(r.get('名称')),
+            "price": safe_float(r.get('最新价')),
+            "change_pct": safe_float(r.get('涨跌幅')),
+            "change_amount": safe_float(r.get('涨跌额')),
+            "volume": safe_float(r.get('成交量')),
+            "amount": safe_float(r.get('成交额')),
+            "open": safe_float(r.get('今开')),
+            "high": safe_float(r.get('最高')),
+            "low": safe_float(r.get('最低')),
+            "prev_close": safe_float(r.get('昨收')),
+            "source": "akshare/eastmoney",
+        }
+        index_cache[cache_key] = result
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Index error: {e}")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8901)

@@ -19,12 +19,12 @@ triggers:
 
 ## 执行流程
 
-1. **数据全面采集** (并行):
-   - datasource-query: 搜索标的所有路演纪要、研报、文章
-   - market-data: 获取行情、K线、技术指标
-   - fund-flow: 获取资金流向数据
-   - news-sentiment: 获取最新新闻和舆情
-   - Web搜索: 补充财务数据、行业数据
+1. **数据全面采集** (并行执行以加速):
+   - **组 A (AKShare, 并行)**: quote + kline + financials + indicators + balance-sheet + cash-flow + fund-flow + shareholders + industry (全部通过 localhost:8901)
+   - **组 B (Datasource, 并行)**: roadshows/search + reports (通过 localhost:3001)
+   - **组 C (Web, 并行)**: Tavily 搜索最新新闻 + 行业动态
+   
+   > **重要**: 组 A/B/C 之间并行，组内串行。用 Bash 的 `curl` 并发请求，或按 MCP tool 分别调用。
 
 2. **多技能串联执行**:
    ```

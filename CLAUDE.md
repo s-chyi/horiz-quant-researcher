@@ -82,18 +82,33 @@
 
 | 数据源 | 端点 | 数据类型 | 状态 |
 |--------|------|---------|------|
-| horiz-datasource-api | localhost:3001 | 路演纪要、研报、公众号文章 | ✅ 可用 |
-| 腾讯行情 API | qt.gtimg.cn | 实时/延迟行情 | ✅ 可用 |
-| 新浪财经 API | finance.sina.com.cn | 资金流向、海外行情 | ✅ 可用 |
+| horiz-datasource-api | localhost:3001 | 路演纪要(2321条)、研报、公众号文章 | ✅ 可用 (需 X-API-Key header) |
+| AKShare 数据服务 | localhost:8901 | A股行情/K线/财报三表/财务指标/资金流向/股东/行业 | ✅ 可用 |
+| 腾讯行情 API | qt.gtimg.cn | 实时/延迟行情 | ✅ 可用 (备选) |
+| 新浪财经 API | finance.sina.com.cn | 资金流向、海外行情 | ✅ 可用 (备选) |
 
-### 待接入数据源 (需 Engineer 补充)
+### AKShare API 端点速查 (localhost:8901)
+
+| 端点 | 用途 | 示例 |
+|------|------|------|
+| `/api/v1/quote/{code}` | 实时行情(价格/PE/PB/市值) | `/api/v1/quote/600519` |
+| `/api/v1/kline/{code}?days=250` | K线(OHLCV) | `/api/v1/kline/600519?days=60` |
+| `/api/v1/financials/{code}` | 财务指标摘要 | `/api/v1/financials/600519` |
+| `/api/v1/indicators/{code}` | DuPont分析(ROE拆解) | `/api/v1/indicators/600519` |
+| `/api/v1/balance-sheet/{code}` | 资产负债表 | `/api/v1/balance-sheet/600519` |
+| `/api/v1/cash-flow/{code}` | 现金流量表 | `/api/v1/cash-flow/600519` |
+| `/api/v1/fund-flow/{code}` | 资金流向 | `/api/v1/fund-flow/600519` |
+| `/api/v1/shareholders/{code}` | 十大股东 | `/api/v1/shareholders/600519` |
+| `/api/v1/industry/{code}` | 行业分类+同行 | `/api/v1/industry/600519` |
+| `/api/v1/index/{code}` | 指数行情 | `/api/v1/index/000300` |
+
+### 待接入数据源 (客户签约后)
 
 | 数据源 | 数据类型 | 优先级 | 说明 |
 |--------|---------|--------|------|
-| AKShare | A股/港股/美股行情+基本面 | P0 | 开源免费，覆盖广 |
-| 巨潮资讯 | 上市公司公告/财报 | P0 | 证监会官方 |
+| Wind API | 权威金融终端数据 | P0 | 待客户提供接口 |
+| 巨潮资讯 | 上市公司公告/财报 | P1 | 证监会官方 |
 | Tushare Pro | A股全面数据 | P1 | 需token |
-| 东方财富 | 行业数据+资金流向 | P1 | 补充维度 |
 
 ---
 

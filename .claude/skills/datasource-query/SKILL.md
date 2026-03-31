@@ -26,87 +26,57 @@ triggers:
 
 ## 可用 API 端点
 
-### 路演纪要 (核心数据)
+### 一、私域数据 (horiz-datasource-api, localhost:3001)
+
+> 请求头: `X-API-Key: bb528ea0bea8f7c4ef3546544f048e6c2dbd9ca54107d8cafdd8ce14047e2c80`
+
+#### 路演纪要 (核心数据, 2321条)
 
 ```
-路演纪要 API:
-
-1. 列表查询:
-   GET /api/roadshows
-   参数:
-   - page: 页码 (默认1)
-   - limit: 每页条数 (默认20)
-   - company: 公司名/代码过滤
-   - date_from: 起始日期
-   - date_to: 截止日期
-   返回: 路演纪要列表 (标题/日期/公司/摘要)
-
-2. 详情查询:
-   GET /api/roadshows/:id
-   返回: 完整路演纪要内容
-
-3. 搜索:
-   GET /api/roadshows/search
-   参数:
-   - q: 关键词搜索
-   - company: 公司过滤
-   返回: 匹配的路演纪要列表
-
-数据规模: ~1,877 条路演纪要
-覆盖时间: 2024年至今
-数据质量: 🟢 一手数据 (直接从路演录音/纪要整理)
+GET /api/v1/roadshows?limit=20&offset=0
+GET /api/v1/roadshows/search?q={keyword}
+GET /api/v1/roadshows/{id}
+GET /api/v1/roadshows/{id}/qa
 ```
 
-### 研报观点
+#### 研报 (184条)
 
 ```
-研报 API:
-
-1. 列表查询:
-   GET /api/reports
-   参数: page, limit, company, date_from, date_to
-
-2. 搜索:
-   GET /api/reports/search
-   参数: q, company
-
-数据规模: ~184 条研报
-数据质量: 🟡 二手整理 (摘要和核心观点)
+GET /api/v1/reports?limit=20&offset=0
+GET /api/v1/reports/{id}
 ```
 
-### 微信文章
+#### 其他
 
 ```
-微信文章 API:
-
-1. 列表查询:
-   GET /api/articles
-   参数: page, limit, source, date_from, date_to
-
-2. 搜索:
-   GET /api/articles/search
-   参数: q, source
-
-数据规模: ~976 条微信文章
-数据质量: 🟡 质量参差 (需验证来源可靠性)
+GET /api/v1/topics       — 热点话题
 ```
 
-### AI 热股/分析师点评
+### 二、金融数据 (AKShare API, localhost:8901)
 
+**行情与K线**:
 ```
-AI 热股 API:
-
-1. 热股列表:
-   GET /api/hot-stocks
-   参数: date
-
-2. 分析师点评:
-   GET /api/analyst-comments
-   参数: stock_code, date
-
-数据质量: 🟡 参考级 (AI生成内容，需交叉验证)
-注意: 目前仅有约1天的数据，待工程团队补全
+GET /api/v1/quote/{code}              — 实时行情 (价格/PE/PB/市值/成交)
+GET /api/v1/kline/{code}?days=250     — K线 (OHLCV, 支持 daily/weekly/monthly)
+GET /api/v1/index/{code}              — 指数行情 (000300=沪深300, 399006=创业板)
 ```
+
+**财务数据**:
+```
+GET /api/v1/financials/{code}         — 财务指标摘要
+GET /api/v1/indicators/{code}         — DuPont 分析 (ROE/ROA/净利率等)
+GET /api/v1/balance-sheet/{code}      — 资产负债表
+GET /api/v1/cash-flow/{code}          — 现金流量表
+```
+
+**资金与股东**:
+```
+GET /api/v1/fund-flow/{code}          — 主力/散户净流入
+GET /api/v1/shareholders/{code}       — 十大股东
+GET /api/v1/industry/{code}           — 行业分类 + 同行公司
+```
+
+**code 格式**: `600519` 或 `600519.SH` 均可
 
 ## 执行步骤
 

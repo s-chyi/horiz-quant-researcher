@@ -27,12 +27,44 @@ triggers:
 - 当前市值/PE/PB 的大致水平
 - 近期是否有重大事件？
 
-**数据源优先级**:
-1. horiz-datasource-api: 查询相关路演纪要和研报
-2. 腾讯行情 API: 获取实时行情
-3. Web 搜索: 补充最新新闻和公告
+## 数据源优先级 (每个维度)
+
+**实时行情 + K线 + 技术指标**:
+1. AKShare API (localhost:8901): `/api/v1/quote/{code}`, `/api/v1/kline/{code}`
+2. 腾讯行情 API: qt.gtimg.cn (备选)
+
+**财务报表 + 财务指标 (DuPont 拆解)**:
+1. AKShare API: `/api/v1/financials/{code}`, `/api/v1/indicators/{code}`
+2. AKShare API: `/api/v1/balance-sheet/{code}`, `/api/v1/cash-flow/{code}`
+
+**路演/研报/机构观点**:
+1. horiz-datasource-api (localhost:3001): `/api/v1/roadshows/search?q={keyword}`
+2. Web 搜索: 补充最新新闻和公告
+
+**资金面分析**:
+1. AKShare API: `/api/v1/fund-flow/{code}`
+2. AKShare API: `/api/v1/shareholders/{code}`
+
+**行业与竞争**:
+1. AKShare API: `/api/v1/industry/{code}` — 申万行业 + 同行列表
 
 ### 步骤 2: 五维分析框架
+1. horiz-datasource-api (localhost:3001): `/api/v1/roadshows/search?q={keyword}`
+2. Web 搜索: 补充最新新闻和公告
+
+**资金面分析**:
+1. AKShare API: `/api/v1/fund-flow/{code}`
+2. AKShare API: `/api/v1/shareholders/{code}`
+
+**行业与竞争**:
+1. AKShare API: `/api/v1/industry/{code}` — 申万行业 + 同行列表
+
+## 参考资料
+
+在执行分析时，参考以下文件:
+- `references/financial-analysis-framework.md` — 财务分析框架
+- `references/valuation-methods.md` — 估值方法论
+- `references/risk-assessment-matrix.md` — 风险评估矩阵
 
 #### 维度一: 基本面分析 (权重 35%)
 
