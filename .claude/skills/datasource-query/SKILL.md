@@ -30,13 +30,16 @@ triggers:
 
 > 请求头: `X-API-Key: bb528ea0bea8f7c4ef3546544f048e6c2dbd9ca54107d8cafdd8ce14047e2c80`
 
-#### 路演纪要 (核心数据, 2321条)
+#### 路演纪要 (核心数据, 2321条, 每日增长)
 
 ```
-GET /api/v1/roadshows?limit=20&offset=0
-GET /api/v1/roadshows/search?q={keyword}
-GET /api/v1/roadshows/{id}
-GET /api/v1/roadshows/{id}/qa
+GET /api/v1/roadshows?limit=20&offset=0         — 列表
+GET /api/v1/roadshows/search?q={keyword}&limit=20 — 搜索（支持中文，返回 results 数组）
+GET /api/v1/roadshows/{id}                       — 详情（含 AI 摘要）
+GET /api/v1/roadshows/{id}/qa                    — Q&A 问答对
+GET /api/v1/roadshows/stats                      — 统计
+
+返回结构: { "total": N, "results": [{ "title", "broker", "rd_date", "ai_summary", "heat", "industry", ... }] }
 ```
 
 #### 研报 (184条)
