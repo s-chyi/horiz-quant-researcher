@@ -62,6 +62,11 @@ def normalize_code(code: str) -> tuple[str, str]:
         return code, 'sh'
 
 
+def em_symbol(pure_code: str, market: str) -> str:
+    """East Money format: SH600519 or SZ000001"""
+    return f"{market.upper()}{pure_code}"
+
+
 def safe_float(val) -> Optional[float]:
     """Safely convert to float."""
     if val is None or pd.isna(val):
@@ -247,41 +252,66 @@ async def get_financials(code: str, limit: int = Query(8, description="Number of
         return financial_cache[cache_key]
     
     try:
-        # Try financial analysis indicators first
-        symbol = f"{pure_code}"
-        df = ak.stock_financial_analysis_indicator(symbol=symbol)
+        # Use stock_financial_abstract_ths (同花顺财务摘要)
+        df = ak.stock_financial_abstract_ths(symbol=pure_code)
         
-        if df is None or df.empty:
-            return {"code": pure_code, "data": [], "source": "akshare", "note": "No data available"}
-        
-        df = df.head(limit)
-        records = df_to_records(df)
-        
-        result = {
-            "code": pure_code,
-            "data": records,
-            "count": len(records),
-            "source": "akshare/eastmoney",
-        }
-        financial_cache[cache_key] = result
-        return result
+        if df is not None and not df.empty:
+            # Sort by report date descending (latest first)
+            if '报告期' in df.columns:
+                df = df.sort_values('报告期', ascending=False)
+            records = df_to_records(df, limit)
+            result = {
+                "code": pure_code,
+                "data": records,
+                "count": len(records),
+                "source": "akshare/ths",
+            }
+            financial_cache[cache_key] = result
+            return result
+    except Exception:
+        pass
+    
+    try:
+        # Fallback: profit sheet from eastmoney
+        symbol = em_symbol(pure_code, market)
+        df = ak.stock_profit_sheet_by_report_em(symbol=symbol)
+        if df is not None and not df.empty:
+            # Extract key metrics
+            records = []
+            for _, r in df.head(limit).iterrows():
+                records.append({
+                    "report_date": safe_str(r.get("REPORT_DATE")),
+                    "report_name": safe_str(r.get("REPORT_DATE_NAME")),
+                    "total_revenue": safe_float(r.get("TOTAL_OPERATE_INCOME")),
+                    "revenue_yoy": safe_float(r.get("TOTAL_OPERATE_INCOME_YOY")),
+                    "operate_income": safe_float(r.get("OPERATE_INCOME")),
+                    "operate_cost": safe_float(r.get("OPERATE_COST")),
+                    "operate_profit": safe_float(r.get("OPERATE_PROFIT")),
+                    "total_profit": safe_float(r.get("TOTAL_PROFIT")),
+                    "net_profit": safe_float(r.get("NETPROFIT")),
+                    "net_profit_yoy": safe_float(r.get("NETPROFIT_YOY")),
+                    "parent_net_profit": safe_float(r.get("PARENT_NETPROFIT")),
+                    "parent_net_profit_yoy": safe_float(r.get("PARENT_NETPROFIT_YOY")),
+                    "deducted_net_profit": safe_float(r.get("DEDUCT_PARENT_NETPROFIT")),
+                    "basic_eps": safe_float(r.get("BASIC_EPS")),
+                    "sale_expense": safe_float(r.get("SALE_EXPENSE")),
+                    "manage_expense": safe_float(r.get("MANAGE_EXPENSE")),
+                    "finance_expense": safe_float(r.get("FINANCE_EXPENSE")),
+                    "research_expense": safe_float(r.get("RESEARCH_EXPENSE")),
+                })
+            result = {
+                "code": pure_code,
+                "data": records,
+                "count": len(records),
+                "source": "akshare/eastmoney/profit_sheet",
+                "note": "Key fields extracted from full profit statement",
+            }
+            financial_cache[cache_key] = result
+            return result
     except Exception as e:
-        # Fallback: try profit sheet
-        try:
-            df = ak.stock_profit_sheet_by_report_em(symbol=f"{market.upper()}{pure_code}")
-            if df is not None and not df.empty:
-                records = df_to_records(df, limit)
-                result = {
-                    "code": pure_code,
-                    "data": records,
-                    "count": len(records),
-                    "source": "akshare/eastmoney/profit_sheet",
-                }
-                financial_cache[cache_key] = result
-                return result
-        except:
-            pass
-        raise HTTPException(status_code=500, detail=f"Failed to fetch financials: {e}")
+        pass
+    
+    return {"code": pure_code, "data": [], "source": "akshare", "note": "No financial data available"}
 
 
 # --- Balance Sheet ---
@@ -295,7 +325,7 @@ async def get_balance_sheet(code: str, limit: int = Query(4)):
         return financial_cache[cache_key]
     
     try:
-        df = ak.stock_balance_sheet_by_report_em(symbol=f"{market.upper()}{pure_code}")
+        df = ak.stock_balance_sheet_by_report_em(symbol=em_symbol(pure_code, market))
         if df is None or df.empty:
             return {"code": pure_code, "data": [], "note": "No data"}
         
@@ -318,7 +348,7 @@ async def get_cash_flow(code: str, limit: int = Query(4)):
         return financial_cache[cache_key]
     
     try:
-        df = ak.stock_cash_flow_sheet_by_report_em(symbol=f"{market.upper()}{pure_code}")
+        df = ak.stock_cash_flow_sheet_by_report_em(symbol=em_symbol(pure_code, market))
         if df is None or df.empty:
             return {"code": pure_code, "data": [], "note": "No data"}
         
@@ -341,23 +371,25 @@ async def get_indicators(code: str):
         return financial_cache[cache_key]
     
     try:
-        df = ak.stock_financial_analysis_indicator(symbol=pure_code)
-        if df is None or df.empty:
-            return {"code": pure_code, "data": [], "note": "No indicator data"}
-        
-        # Take latest 4 periods
-        records = df_to_records(df, 4)
-        result = {
-            "code": pure_code,
-            "data": records,
-            "count": len(records),
-            "source": "akshare",
-            "note": "Contains ROE, ROA, gross_margin, net_margin, etc.",
-        }
-        financial_cache[cache_key] = result
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Indicators error: {e}")
+        # Use stock_financial_abstract_ths for key indicators
+        df = ak.stock_financial_abstract_ths(symbol=pure_code)
+        if df is not None and not df.empty:
+            if '报告期' in df.columns:
+                df = df.sort_values('报告期', ascending=False)
+            records = df_to_records(df, 8)
+            result = {
+                "code": pure_code,
+                "data": records,
+                "count": len(records),
+                "source": "akshare/ths",
+                "note": "Contains net_profit, revenue, eps, ROE etc. from THS financial abstract",
+            }
+            financial_cache[cache_key] = result
+            return result
+    except Exception:
+        pass
+    
+    return {"code": pure_code, "data": [], "note": "No indicator data available"}
 
 
 # --- Industry Classification ---
