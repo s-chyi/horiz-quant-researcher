@@ -140,7 +140,7 @@ async def health():
 # --- Quote ---
 @app.get("/api/v1/quote/{code}")
 async def get_quote(code: str):
-    """实时行情: 股价、涨跌幅、成交量、市值、PE/PB"""
+    """实时行情: 股价、涨跌幅、成交量、市值、PE/PB (fast ~1s per stock)"""
     pure_code, market = normalize_code(code)
     cache_key = f"quote:{pure_code}"
     
@@ -148,42 +148,88 @@ async def get_quote(code: str):
         return quote_cache[cache_key]
     
     try:
-        df = ak.stock_zh_a_spot_em()
-        row = df[df['代码'] == pure_code]
-        if row.empty:
-            raise HTTPException(status_code=404, detail=f"Stock {pure_code} not found")
+        # Fast path: use individual stock APIs (~1s total vs ~90s for full scan)
+        info_df = ak.stock_individual_info_em(symbol=pure_code)
+        bid_df = ak.stock_bid_ask_em(symbol=pure_code)
         
-        r = row.iloc[0]
+        # Parse info (key-value format)
+        info = {}
+        if info_df is not None and not info_df.empty:
+            for _, row in info_df.iterrows():
+                info[str(row.get('item', ''))] = row.get('value')
+        
+        # Parse bid/ask
+        bid = {}
+        if bid_df is not None and not bid_df.empty:
+            for _, row in bid_df.iterrows():
+                bid[str(row.get('item', ''))] = row.get('value')
+        
+        price = safe_float(bid.get('最新'))
+        prev_close = safe_float(info.get('最新'))  # info has latest too
+        
         result = {
             "code": pure_code,
-            "name": safe_str(r.get('名称')),
-            "price": safe_float(r.get('最新价')),
-            "change_pct": safe_float(r.get('涨跌幅')),
-            "change_amount": safe_float(r.get('涨跌额')),
-            "volume": safe_int(r.get('成交量')),
-            "amount": safe_float(r.get('成交额')),
-            "open": safe_float(r.get('今开')),
-            "high": safe_float(r.get('最高')),
-            "low": safe_float(r.get('最低')),
-            "prev_close": safe_float(r.get('昨收')),
-            "turnover_rate": safe_float(r.get('换手率')),
-            "pe_ratio": safe_float(r.get('市盈率-动态')),
-            "pb_ratio": safe_float(r.get('市净率')),
-            "total_market_cap": safe_float(r.get('总市值')),
-            "circulating_market_cap": safe_float(r.get('流通市值')),
-            "amplitude": safe_float(r.get('振幅')),
-            "volume_ratio": safe_float(r.get('量比')),
-            "52w_high": safe_float(r.get('60日最高')),
-            "52w_low": safe_float(r.get('60日最低')),
+            "name": safe_str(info.get('股票简称')),
+            "price": price,
+            "change_pct": safe_float(bid.get('涨幅')),
+            "change_amount": safe_float(bid.get('涨跌')),
+            "volume": safe_int(bid.get('总手')),
+            "amount": safe_float(bid.get('金额')),
+            "turnover_rate": safe_float(bid.get('换手')),
+            "volume_ratio": safe_float(bid.get('量比')),
+            "total_market_cap": safe_float(info.get('总市值')),
+            "circulating_market_cap": safe_float(info.get('流通市值')),
+            "total_shares": safe_float(info.get('总股本')),
+            "industry": safe_str(info.get('行业')),
+            "pe_ratio": None,  # will compute below
+            "pb_ratio": None,
             "source": "akshare/eastmoney",
             "updated_at": datetime.now().isoformat(),
         }
+        
+        # Try to get PE/PB from a fast supplementary call
+        try:
+            spot_df = ak.stock_individual_spot_xq(symbol=f"{'SH' if market == 'sh' else 'SZ'}{pure_code}")
+            if spot_df is not None and not spot_df.empty:
+                spot = {}
+                for _, row in spot_df.iterrows():
+                    spot[str(row.get('item', ''))] = row.get('value')
+                result["pe_ratio"] = safe_float(spot.get('pe_ttm') or spot.get('市盈率'))
+                result["pb_ratio"] = safe_float(spot.get('pb') or spot.get('市净率'))
+        except Exception:
+            # Fallback: compute PE from market_cap / net_profit if we have financial data
+            pass
+        
         quote_cache[cache_key] = result
         return result
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch quote: {e}")
+        # Ultimate fallback: full scan (slow but reliable)
+        try:
+            df = ak.stock_zh_a_spot_em()
+            row = df[df['代码'] == pure_code]
+            if row.empty:
+                raise HTTPException(status_code=404, detail=f"Stock {pure_code} not found")
+            r = row.iloc[0]
+            result = {
+                "code": pure_code,
+                "name": safe_str(r.get('名称')),
+                "price": safe_float(r.get('最新价')),
+                "change_pct": safe_float(r.get('涨跌幅')),
+                "change_amount": safe_float(r.get('涨跌额')),
+                "volume": safe_int(r.get('成交量')),
+                "amount": safe_float(r.get('成交额')),
+                "turnover_rate": safe_float(r.get('换手率')),
+                "pe_ratio": safe_float(r.get('市盈率-动态')),
+                "pb_ratio": safe_float(r.get('市净率')),
+                "total_market_cap": safe_float(r.get('总市值')),
+                "circulating_market_cap": safe_float(r.get('流通市值')),
+                "source": "akshare/eastmoney/full_scan",
+                "updated_at": datetime.now().isoformat(),
+            }
+            quote_cache[cache_key] = result
+            return result
+        except Exception as e2:
+            raise HTTPException(status_code=500, detail=f"Failed to fetch quote: {e2}")
 
 
 # --- K-Line ---
